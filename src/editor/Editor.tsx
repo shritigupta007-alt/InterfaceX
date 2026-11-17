@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { PanelLeft, PanelRight, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { PanelLeft, PanelRight, X, Eye } from 'lucide-react';
 import { useEditor } from './useEditor';
 import { Toolbar } from './Toolbar';
 import { ComponentSidebar } from './ComponentSidebar';
@@ -7,17 +7,43 @@ import { Canvas } from './Canvas';
 import { PropertiesPanel } from './PropertiesPanel';
 import { CodePanel } from './CodePanel';
 import { AnalyzerPanel } from './AnalyzerPanel';
+import { useCollaboration } from './useCollaboration';
+import type { Project } from '@/engine/types';
 
 interface Props {
   onExit: () => void;
+  project?: Project;
+  initialRole?: 'OWNER' | 'EDITOR' | 'VIEWER';
 }
 
-export function Editor({ onExit }: Props) {
-  const api = useEditor();
+export function Editor({ onExit, project, initialRole = 'OWNER' }: Props) {
+  const api = useEditor(project, initialRole);
   const [showAnalyzer, setShowAnalyzer] = useState(false);
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
   const [codeOpen, setCodeOpen] = useState(true);
+
+  // Real-time Yjs CRDT collaboration
+  const collab = useCollaboration({
+    projectId: api.project.id,
+    initialTree: api.tree,
+    onRemoteTreeChange: api.applyRemoteTree,
+    selectedId: api.selectedId,
+  });
+
+  // Sync role from server collaboration handshake
+  useEffect(() => {
+    if (collab.role && collab.role !== api.role) {
+      api.setRole(collab.role);
+    }
+  }, [collab.role, api.role, api.setRole]);
+
+  // Broadcast local changes to other peers
+  useEffect(() => {
+    if (api.dirty) {
+      collab.broadcastTree(api.tree);
+    }
+  }, [api.tree, api.dirty, collab.broadcastTree]);
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#F1F2F8] overflow-hidden">
@@ -26,20 +52,40 @@ export function Editor({ onExit }: Props) {
         onToggleSidebar={() => setLeftOpen((v) => !v)}
         onToggleRight={() => setRightOpen((v) => !v)}
         onAnalyze={() => setShowAnalyzer(true)}
+        collaborators={collab.collaborators}
+        isConnected={collab.isConnected}
       />
 
+      {/* Read-only notification banner */}
+      {api.isReadOnly && (
+        <div className="bg-[#FEF6E7] border-b border-[#F9E2B3] px-4 py-1.5 text-xs text-[#8F5900] flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-1.5">
+            <Eye size={14} />
+            <span>
+              You are viewing this project with <strong>Read-Only</strong> permissions. Editing is disabled.
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 flex min-h-0 relative">
-        {/* Left sidebar - desktop */}
-        <aside className="w-60 border-r border-[#E5E7F0] flex-shrink-0 hidden lg:block">
-          <ComponentSidebar api={api} />
-        </aside>
+        {/* Left sidebar - desktop (hidden in viewer mode) */}
+        {!api.isReadOnly && (
+          <aside className="w-60 border-r border-[#E5E7F0] flex-shrink-0 hidden lg:block">
+            <ComponentSidebar api={api} />
+          </aside>
+        )}
 
         {/* Left sidebar - mobile drawer */}
-        {leftOpen && (
+        {!api.isReadOnly && leftOpen && (
           <div className="lg:hidden fixed inset-0 z-40">
             <div className="absolute inset-0 bg-black/30" onClick={() => setLeftOpen(false)} />
             <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl">
-              <div className="flex justify-end p-2"><button onClick={() => setLeftOpen(false)} className="p-1.5 text-[#6B6C85]"><X size={18} /></button></div>
+              <div className="flex justify-end p-2">
+                <button onClick={() => setLeftOpen(false)} className="p-1.5 text-[#6B6C85]">
+                  <X size={18} />
+                </button>
+              </div>
               <ComponentSidebar api={api} onClose={() => setLeftOpen(false)} />
             </div>
           </div>
@@ -48,9 +94,28 @@ export function Editor({ onExit }: Props) {
         {/* Center: canvas + code panel */}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           <div className="flex items-center gap-1 px-2 py-1 bg-white border-b border-[#E5E7F0] lg:hidden flex-shrink-0">
-            <button onClick={() => setLeftOpen(true)} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[#6B6C85]"><PanelLeft size={14} /> Components</button>
-            <button onClick={() => setRightOpen(true)} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[#6B6C85]"><PanelRight size={14} /> Properties</button>
-            <button onClick={() => setCodeOpen((v) => !v)} className="ml-auto px-2 py-1 rounded text-xs text-[#6B6C85]">{codeOpen ? 'Hide' : 'Show'} Code</button>
+            {!api.isReadOnly && (
+              <button
+                onClick={() => setLeftOpen(true)}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[#6B6C85]"
+              >
+                <PanelLeft size={14} /> Components
+              </button>
+            )}
+            {!api.isReadOnly && (
+              <button
+                onClick={() => setRightOpen(true)}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[#6B6C85]"
+              >
+                <PanelRight size={14} /> Properties
+              </button>
+            )}
+            <button
+              onClick={() => setCodeOpen((v) => !v)}
+              className="ml-auto px-2 py-1 rounded text-xs text-[#6B6C85]"
+            >
+              {codeOpen ? 'Hide' : 'Show'} Code
+            </button>
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col">
@@ -63,17 +128,23 @@ export function Editor({ onExit }: Props) {
           </div>
         </main>
 
-        {/* Right sidebar - desktop */}
-        <aside className="w-72 border-l border-[#E5E7F0] flex-shrink-0 hidden lg:block">
-          <PropertiesPanel api={api} />
-        </aside>
+        {/* Right sidebar - desktop (hidden in viewer mode) */}
+        {!api.isReadOnly && (
+          <aside className="w-72 border-l border-[#E5E7F0] flex-shrink-0 hidden lg:block">
+            <PropertiesPanel api={api} />
+          </aside>
+        )}
 
         {/* Right sidebar - mobile drawer */}
-        {rightOpen && (
+        {!api.isReadOnly && rightOpen && (
           <div className="lg:hidden fixed inset-0 z-40">
             <div className="absolute inset-0 bg-black/30" onClick={() => setRightOpen(false)} />
             <div className="absolute right-0 top-0 bottom-0 w-72 bg-white shadow-xl">
-              <div className="flex justify-end p-2"><button onClick={() => setRightOpen(false)} className="p-1.5 text-[#6B6C85]"><X size={18} /></button></div>
+              <div className="flex justify-end p-2">
+                <button onClick={() => setRightOpen(false)} className="p-1.5 text-[#6B6C85]">
+                  <X size={18} />
+                </button>
+              </div>
               <PropertiesPanel api={api} onClose={() => setRightOpen(false)} />
             </div>
           </div>
@@ -87,12 +158,12 @@ export function Editor({ onExit }: Props) {
         )}
       </div>
 
-      {/* Exit button (back to landing) */}
+      {/* Exit button (back to dashboard) */}
       <button
         onClick={onExit}
         className="fixed bottom-4 right-4 z-50 px-3 py-1.5 rounded-md text-xs font-medium bg-white border border-[#E5E7F0] text-[#6B6C85] shadow-sm hover:text-[#17182B]"
       >
-        Back to Home
+        Dashboard
       </button>
     </div>
   );

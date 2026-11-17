@@ -1,4 +1,5 @@
-import { ArrowDownRight, ArrowRight, Braces, Check, Code2, Layers3, MousePointer2, PanelsTopLeft, ScanLine, SlidersHorizontal, Smartphone, Sparkles } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, Braces, Check, Code2, Layers3, MousePointer2, PanelsTopLeft, ScanLine, SlidersHorizontal, Smartphone, Sparkles, User } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 interface Props { onOpenPlayground: () => void; }
 
@@ -18,11 +19,32 @@ const examples = [
 ];
 
 export function Landing({ onOpenPlayground }: Props) {
+  const { user, openAuthModal } = useAuth();
+
   return <main className="ix-site">
     <nav className="ix-nav">
       <a className="ix-brand" href="#top" aria-label="InterfaceX home"><span className="ix-brand-mark"><PanelsTopLeft size={19} strokeWidth={2.4} /></span><span>interface<span className="ix-brand-x">x</span><small>THE FRONTEND WORKSHOP</small></span></a>
       <div className="ix-nav-links"><a href="#approach">Approach</a><a href="#components">Components</a><a href="#workflow">Workflow</a></div>
-      <button className="ix-nav-cta" onClick={onOpenPlayground}>Open the workspace <ArrowRight size={15} /></button>
+      <div className="flex items-center gap-3">
+        {user ? (
+          <button className="ix-nav-cta flex items-center gap-2" onClick={onOpenPlayground}>
+            <span>Go to Dashboard</span>
+            <ArrowRight size={15} />
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={() => openAuthModal('login')}
+              className="text-xs font-bold text-[#17182B] hover:text-[#7657FF] px-2 py-1 transition-colors"
+            >
+              Sign In
+            </button>
+            <button className="ix-nav-cta" onClick={onOpenPlayground}>
+              Open Workspace <ArrowRight size={15} />
+            </button>
+          </>
+        )}
+      </div>
     </nav>
 
     <section id="top" className="ix-hero">
